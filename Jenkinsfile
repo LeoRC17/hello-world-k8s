@@ -7,9 +7,7 @@ pipeline {
   }
 
   environment {
-    // Base Nexus URL (optional; distributionManagement in pom.xml will determine final repo)
     NEXUS_URL = 'http://192.168.49.2:30001'
-    // Jenkins credentials ID that contains Nexus username/password
     NEXUS_CREDENTIALS_ID = 'nexus-creds'
   }
 
@@ -46,7 +44,6 @@ pipeline {
     stage('Resolve artifact metadata') {
       steps {
         script {
-          // Use Maven to reliably evaluate project coordinates
           env.GROUP_ID = sh(script: "mvn help:evaluate -Dexpression=project.groupId -q -DforceStdout", returnStdout: true).trim()
           env.ARTIFACT_ID = sh(script: "mvn help:evaluate -Dexpression=project.artifactId -q -DforceStdout", returnStdout: true).trim()
           env.ARTIFACT_VERSION = sh(script: "mvn help:evaluate -Dexpression=project.version -q -DforceStdout", returnStdout: true).trim()
@@ -59,70 +56,29 @@ pipeline {
       }
     }
 
-stage('Deploy') {
-  when { expression { env.ARTIFACT_VERSION && env.ARTIFACT_ID && env.GROUP_ID } }
-  steps {
-    script {
-      // ensure artifact exists
-      sh """
-        ART=target/${env.ARTIFACT_ID}-${env.ARTIFACT_VERSION}.jar
-        echo "Looking for \$ART"
-        ls -la target || true
-        if [ ! -f "\$ART" ]; then
-          echo "ERROR: artifact \$ART not found"
-          exit 1
-        fi
-      """
+    stage('Deploy') {
+      when { expression { env.ARTIFACT_VERSION && env.ARTIFACT_ID && env.GROUP_ID } }
+      steps {
+        script {
+          sh """
+            ART=target/${env.ARTIFACT_ID}-${env.ARTIFACT_VERSION}.jar
+            echo "Looking for \$ART"
+            ls -la target || true
+            if [ ! -f "\$ART" ]; then
+              echo "ERROR: artifact \$ART not found"
+              exit 1
+            fi
+          """
 
-      withCredentials([usernamePassword(credentialsId: env.NEXUS_CREDENTIALS_ID,
-                                        usernameVariable: 'NEXUS_USER',
-                                        passwordVariable: 'NEXUS_PASS')]) {
-        // create temporary settings.xml and run mvn deploy with verbose output
-        sh """
-          cat > ci-settings.xml <<EOF
-          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
-                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
-            <servers>
-              <server>
-                <id>nexus-releases</id>
-                <username>${NEXUS_USER}</username>
-                <password>${NEXUS_PASS}</password>
-              </server>
-              <server>
-                <id>nexus-snapshots</id>
-                <username>${NEXUS_USER}</username>
-                <password>${NEXUS_PASS}</password>
-              </server>
-            </servers>
-          </settings>
-          EOF
-
-          # Run deploy with debug so upload lines are visible; tee to capture output
-          mvn -B -DskipTests -X deploy --settings ci-settings.xml | tee mvn-deploy.log
-          tail -n 200 mvn-deploy.log || true
-        """
-      }
-
-      // cleanup
-      sh 'rm -f ci-settings.xml mvn-deploy.log || true'
-    }
-  }
-}
-
-
-          // Create a temporary settings.xml with credentials and run mvn deploy (uses distributionManagement in pom.xml)
           withCredentials([usernamePassword(credentialsId: env.NEXUS_CREDENTIALS_ID,
                                             usernameVariable: 'NEXUS_USER',
                                             passwordVariable: 'NEXUS_PASS')]) {
-            sh '''
+            sh """
               cat > ci-settings.xml <<EOF
               <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
                         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                        xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
-                                            https://maven.apache.org/xsd/settings-1.0.0.xsd">
+                        xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
                 <servers>
-                  <!-- IDs must match the <id> values in distributionManagement of pom.xml -->
                   <server>
                     <id>nexus-releases</id>
                     <username>${NEXUS_USER}</username>
@@ -137,13 +93,12 @@ stage('Deploy') {
               </settings>
               EOF
 
-              # Run Maven deploy which will use distributionManagement in the POM to choose the correct repo
-              mvn -B -DskipTests deploy --settings ci-settings.xml
-            '''
+              mvn -B -DskipTests -X deploy --settings ci-settings.xml | tee mvn-deploy.log
+              tail -n 200 mvn-deploy.log || true
+            """
           }
 
-          // Cleanup temporary settings
-          sh 'rm -f ci-settings.xml || true'
+          sh 'rm -f ci-settings.xml mvn-deploy.log || true'
         }
       }
     }
