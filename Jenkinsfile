@@ -7,7 +7,7 @@ pipeline {
     }
     
     environment {
-        NEXUS_URL = 'http://your-nexus-server:8081'  // Update with your Nexus URL
+        NEXUS_URL = 'http://192.168.49.2:30001/repository/maven-releases/'  // Update with your Nexus URL
         NEXUS_REPOSITORY = 'maven-releases'          // or 'maven-snapshots'
         NEXUS_CREDENTIALS_ID = 'nexus-creds'   // Jenkins credentials ID for Nexus
     }
