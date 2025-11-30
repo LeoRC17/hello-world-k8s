@@ -60,6 +60,7 @@ pipeline {
       when { expression { env.ARTIFACT_VERSION && env.ARTIFACT_ID && env.GROUP_ID } }
       steps {
         script {
+          // ensure artifact exists
           sh """
             ART=target/${env.ARTIFACT_ID}-${env.ARTIFACT_VERSION}.jar
             echo "Looking for \$ART"
@@ -73,7 +74,9 @@ pipeline {
           withCredentials([usernamePassword(credentialsId: env.NEXUS_CREDENTIALS_ID,
                                             usernameVariable: 'NEXUS_USER',
                                             passwordVariable: 'NEXUS_PASS')]) {
-            sh """
+            // create temporary settings.xml and run mvn deploy with verbose output
+            // use single-quoted sh block so Groovy does not interpolate secrets; shell expands $NEXUS_USER/$NEXUS_PASS
+            sh '''
               cat > ci-settings.xml <<EOF
               <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
                         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -81,23 +84,25 @@ pipeline {
                 <servers>
                   <server>
                     <id>nexus-releases</id>
-                    <username>${NEXUS_USER}</username>
-                    <password>${NEXUS_PASS}</password>
+                    <username>$NEXUS_USER</username>
+                    <password>$NEXUS_PASS</password>
                   </server>
                   <server>
                     <id>nexus-snapshots</id>
-                    <username>${NEXUS_USER}</username>
-                    <password>${NEXUS_PASS}</password>
+                    <username>$NEXUS_USER</username>
+                    <password>$NEXUS_PASS</password>
                   </server>
                 </servers>
               </settings>
               EOF
 
+              # Run deploy with debug so upload lines are visible; tee to capture output
               mvn -B -DskipTests -X deploy --settings ci-settings.xml | tee mvn-deploy.log
               tail -n 200 mvn-deploy.log || true
-            """
+            '''
           }
 
+          // cleanup
           sh 'rm -f ci-settings.xml mvn-deploy.log || true'
         }
       }
