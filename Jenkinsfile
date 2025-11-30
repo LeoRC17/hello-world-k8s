@@ -59,26 +59,57 @@ pipeline {
       }
     }
 
-    stage('Deploy to Nexus') {
-      when {
-        expression { env.ARTIFACT_VERSION && env.ARTIFACT_ID && env.GROUP_ID }
-      }
-      steps {
-        script {
-          // Determine whether this is a snapshot build (pom's distributionManagement will route correctly)
-          def isSnapshot = env.ARTIFACT_VERSION?.endsWith('-SNAPSHOT')
-          echo "Deploying ${env.GROUP_ID}:${env.ARTIFACT_ID}:${env.ARTIFACT_VERSION} (snapshot=${isSnapshot})"
+stage('Deploy') {
+  when { expression { env.ARTIFACT_VERSION && env.ARTIFACT_ID && env.GROUP_ID } }
+  steps {
+    script {
+      // ensure artifact exists
+      sh """
+        ART=target/${env.ARTIFACT_ID}-${env.ARTIFACT_VERSION}.jar
+        echo "Looking for \$ART"
+        ls -la target || true
+        if [ ! -f "\$ART" ]; then
+          echo "ERROR: artifact \$ART not found"
+          exit 1
+        fi
+      """
 
-          // Ensure artifact exists
-          sh """
-            ARTIFACT=target/${env.ARTIFACT_ID}-${env.ARTIFACT_VERSION}.jar
-            echo "Looking for artifact: \$ARTIFACT"
-            ls -la target || true
-            if [ ! -f "\$ARTIFACT" ]; then
-              echo "ERROR: Artifact \$ARTIFACT not found. Aborting deploy."
-              exit 1
-            fi
-          """
+      withCredentials([usernamePassword(credentialsId: env.NEXUS_CREDENTIALS_ID,
+                                        usernameVariable: 'NEXUS_USER',
+                                        passwordVariable: 'NEXUS_PASS')]) {
+        // create temporary settings.xml and run mvn deploy with verbose output
+        sh """
+          cat > ci-settings.xml <<EOF
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+            <servers>
+              <server>
+                <id>nexus-releases</id>
+                <username>${NEXUS_USER}</username>
+                <password>${NEXUS_PASS}</password>
+              </server>
+              <server>
+                <id>nexus-snapshots</id>
+                <username>${NEXUS_USER}</username>
+                <password>${NEXUS_PASS}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
+
+          # Run deploy with debug so upload lines are visible; tee to capture output
+          mvn -B -DskipTests -X deploy --settings ci-settings.xml | tee mvn-deploy.log
+          tail -n 200 mvn-deploy.log || true
+        """
+      }
+
+      // cleanup
+      sh 'rm -f ci-settings.xml mvn-deploy.log || true'
+    }
+  }
+}
+
 
           // Create a temporary settings.xml with credentials and run mvn deploy (uses distributionManagement in pom.xml)
           withCredentials([usernamePassword(credentialsId: env.NEXUS_CREDENTIALS_ID,
