@@ -1,6 +1,11 @@
 pipeline {
   agent any
 
+  tools {
+    jdk 'jdk'        // matches the JDK name you configured in Global Tool Configuration
+    maven 'maven'    // matches the Maven name you configured in Global Tool Configuration
+  }
+
   environment {
     NEXUS_URL = 'http://192.168.49.2:30001'
     NEXUS_REPO = 'maven-releases'
@@ -14,9 +19,22 @@ pipeline {
       }
     }
 
+    stage('Verify tools') {
+      steps {
+        sh 'echo NODE: $(hostname)'
+        sh 'echo JENKINS_HOME: $JENKINS_HOME'
+        sh 'java -version || true'
+        sh 'mvn -v || true'
+      }
+    }
+
     stage('Build') {
       steps {
         sh 'mvn -B clean package -DskipTests'
+      }
+      post {
+        success { echo 'Build successful' }
+        failure { echo 'Build failed' }
       }
     }
 
@@ -29,7 +47,6 @@ pipeline {
           def filePath = "target/${artifactId}-${version}.jar"
 
           withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-            // Quick upload to the releases repo (works for testing)
             sh """
               curl -u ${NEXUS_USER}:${NEXUS_PASS} --fail --show-error \
                 --upload-file ${filePath} \
